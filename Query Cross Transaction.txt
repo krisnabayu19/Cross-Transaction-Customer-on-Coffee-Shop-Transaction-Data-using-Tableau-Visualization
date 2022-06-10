@@ -1,0 +1,74 @@
+with base as (
+	select
+		date_trunc('week',tt.transaction_date) as week_date 
+		,tt.transaction_date 
+		,tt.customer_id
+		,tt.product_id
+		,tp.product_type
+		,tp.product_category 
+	from tb_transaction tt
+	left join tb_product tp on tt.product_id = tp.product_id
+	where customer_id != 0
+),
+temp_transac as (
+	select 
+		base.*
+		,row_number () over (partition by customer_id,week_date,transaction_date,product_category order by transaction_date asc) AS rn_1
+	from base
+),
+transac as (
+	select
+		temp_transac.*
+		,row_number () over (partition by customer_id,week_date,rn_1 order by transaction_date asc) AS rn_2 
+	from temp_transac
+	where rn_1 = 1
+),
+first_transac as (
+	select
+		week_date
+		,transaction_date
+		,customer_id
+		,product_id
+		,product_type
+		,product_category
+		,rn_1
+		,rn_2
+	from transac
+	where rn_2 = 1
+),
+second_transac as (
+	select
+		week_date
+		,transaction_date
+		,customer_id
+		,product_id
+		,product_type
+		,product_category
+		,rn_1
+		,rn_2
+	from transac
+	where rn_2 = 2
+),
+temp_final as (
+	select 
+		base.*
+		,first_transac.product_category as first_transac_data
+		,second_transac.product_category as second_transac_data
+	from base
+	left join first_transac on base.customer_id = first_transac.customer_id
+		and base.week_date = first_transac.week_date
+	left join second_transac on base.customer_id = second_transac.customer_id
+		and base.week_date = second_transac.week_date
+	order by base.week_date asc, base.transaction_date asc
+),
+final_data as (
+	select 
+		temp_final.*
+		,concat(concat(first_transac_data, ' -> '), second_transac_data) as cross_transac_1_to_2
+		,case when first_transac_data = second_transac_data then 'Not Change'
+		when second_transac_data is null then 'Do Not Have Second Transaction'
+		else 'Change' end as status_cross_transac
+	from temp_final
+)
+select * from final_data
+order by customer_id asc, week_date asc, transaction_date asc
